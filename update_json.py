@@ -1,9 +1,11 @@
 import json
 import plistlib
 import re
-import requests
 import os
-from datetime import datetime
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from zipfile import ZipFile
 
 def prepare_description(text):
     text = re.sub('<[^<]+?>', '', text) # Remove HTML tags
@@ -15,6 +17,8 @@ def prepare_description(text):
     return text
 
 def fetch_latest_release(repo_url):
+    import requests
+
     api_url = f"https://api.github.com/repos/{repo_url}/releases"
     headers = {
         "Accept": "application/vnd.github+json",
@@ -31,6 +35,8 @@ def fetch_latest_release(repo_url):
         raise
 
 def get_file_size(url):
+    import requests
+
     try:
         response = requests.head(url)
         response.raise_for_status()
@@ -130,74 +136,53 @@ def update_json_file_release(json_file, latest_release):
         print(f"Error writing to JSON file: {e}")
         raise
 
-def update_json_file_nightly(json_file, nightly_release):
-    if isinstance(nightly_release, list) and nightly_release:
-        nightly_release = next((item for item in nightly_release if item["tag_name"] == "nightly"), None)
-    else:
-        print("Error getting nightly release")
-        return
+def git_output(*args):
+    return subprocess.check_output(["git", *args], encoding="utf-8").strip()
 
-    try:
-        with open(json_file, "r") as file:
-            data = json.load(file)
-    except json.JSONDecodeError as e:
-        print(f"Error reading JSON file: {e}")
-        data = {"apps": []}
-        raise
 
+def update_json_file_nightly(json_file, ipa_file):
+    data = json.loads(json_file.read_text(encoding="utf-8"))
     app = data["apps"][0]
 
-    with open("OpenParsec/Info.plist", 'rb') as infile:
-        info_plist = plistlib.load(infile)
-    full_version = info_plist["CFBundleShortVersionString"]
-    tag = nightly_release["tag_name"]
-    version = re.search(r"(\d+\.\d+\.\d+)", full_version).group(1)
-    version_date = nightly_release["published_at"]
-    date_obj = datetime.strptime(version_date, "%Y-%m-%dT%H:%M:%SZ")
-    version_date = date_obj.strftime("%Y-%m-%d")
+    with ZipFile(ipa_file) as ipa:
+        plist_path = f"Payload/{ipa_file.stem}.app/Info.plist"
+        info_plist = plistlib.loads(ipa.read(plist_path))
+    if info_plist["CFBundleIdentifier"] != app["bundleIdentifier"]:
+        raise ValueError("The IPA bundle identifier does not match the AltStore source")
 
-    nightly_link = os.environ.get("NIGHTLY_LINK", "")
-    commit_sha = os.environ.get("commit_sha", "")[:7]
-    commit_msg = os.environ.get("commit_msg", "").strip()
-    build_number = os.environ.get("BUILD_NUMBER", "")
+    version = info_plist["CFBundleShortVersionString"]
+    build_number = info_plist["CFBundleVersion"]
+    version_date = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    repository = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+    download_url = f"{repository}/releases/download/nightly/{ipa_file.name}"
+    size = ipa_file.stat().st_size
 
-    description = f"""\
-Nightly build from [{commit_sha}](https://github.com/hugeBlack/OpenParsec/commit/{commit_sha}):\
- {commit_msg}
+    commit_sha = git_output("rev-parse", "--short", "HEAD")
+    headline = git_output("log", "-1", "--format=%s", "HEAD")
+    changes = ""
+    if git_output("tag", "--list", "nightly"):
+        changes = git_output("log", "--no-merges", "--format=- %s", "refs/tags/nightly..HEAD")
+    if not changes:
+        changes = f"- {headline}"
 
-This is a nightly release [created automatically with GitHub Actions workflow]({nightly_link}).
-"""
-    description = prepare_description(description)
+    description = (
+        f"OpenParsec {version} (build {build_number})\n\n"
+        f"{changes}\n\n"
+        f"Build details: {os.environ['NIGHTLY_LINK']}\n"
+    )
 
-    assets = nightly_release.get("assets", [])
-    download_url = None
-    size = None
-    for asset in assets:
-        if asset["name"] == f"OpenParsec.ipa":
-            download_url = asset["browser_download_url"]
-            size = asset["size"]
-            break
-
-    if download_url is None or size is None:
-        print("Error: IPA file not found in release assets.")
-        return
-
-    version_entry = {
+    app["versions"] = [{
         "version": version,
+        "buildVersion": build_number,
+        "buildNumber": build_number,
         "date": version_date,
         "localizedDescription": description,
         "downloadURL": download_url,
         "size": size,
+        "minOSVersion": info_plist["MinimumOSVersion"],
         "commit": commit_sha,
-        "headline": commit_msg
-    }
-    if build_number:
-        version_entry["buildVersion"] = build_number
-        version_entry["buildNumber"] = build_number
-
-    app["versions"].clear()
-    app["versions"].append(version_entry)
-
+        "headline": headline,
+    }]
     app.update({
         "version": version,
         "versionDate": version_date,
@@ -205,35 +190,21 @@ This is a nightly release [created automatically with GitHub Actions workflow]({
         "downloadURL": download_url,
         "size": size,
         "commit": commit_sha,
-        "headline": commit_msg
+        "headline": headline,
     })
-
     data["news"] = []
 
-    try:
-        with open(json_file, "w") as file:
-            json.dump(data, file, indent=2)
-        print("JSON file updated successfully.")
-    except IOError as e:
-        print(f"Error writing to JSON file: {e}")
-        raise
+    json_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    Path("nightly-notes.md").write_text(description, encoding="utf-8")
 
 
 def main():
-    repo_url = os.environ.get("GITHUB_REPOSITORY", "hugeBlack/OpenParsec")
-    is_nightly = "NIGHTLY_LINK" in os.environ
+    if "NIGHTLY_LINK" in os.environ:
+        update_json_file_nightly(Path("altstore.json"), Path(os.environ["NIGHTLY_IPA"]))
+    else:
+        repo_url = os.environ.get("GITHUB_REPOSITORY", "hugeBlack/OpenParsec")
+        update_json_file_release("apps.json", fetch_latest_release(repo_url))
 
-    try:
-        fetched_data_latest = fetch_latest_release(repo_url)
-        if is_nightly:
-            json_file = "altstore.json"
-            update_json_file_nightly(json_file, fetched_data_latest)
-        else:
-            json_file = "apps.json"
-            update_json_file_release(json_file, fetched_data_latest)
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        raise
 
 if __name__ == "__main__":
     main()

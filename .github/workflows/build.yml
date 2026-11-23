@@ -127,27 +127,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download a Build Artifact
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.package.outputs.artifact }}
-      - name: Update AltStore source
-        id: update_source
+      - name: Generate AltStore source and nightly notes
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NIGHTLY_LINK: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
-          commit_sha: ${{ env.COMMIT_SHA }}
-          commit_msg: ${{ env.COMMIT_MSG }}
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: |
-          python update_json.py
+          NIGHTLY_IPA: ${{ needs.package.outputs.artifact }}
+        run: python3 update_json.py
       - name: Nightly Release
         uses: andelf/nightly-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          body: |
-            This is a nightly release [created automatically with GitHub Actions workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}).
+          body_path: nightly-notes.md
           files: |
             ${{ needs.package.outputs.artifact }}
             altstore.json
