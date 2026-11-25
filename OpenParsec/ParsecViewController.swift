@@ -89,8 +89,11 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	var menuEdgeSwipeRight: UIScreenEdgePanGestureRecognizer?
 	var scrollView: UIScrollView!
 	var contentView: UIView!
-	var lastLaidOutWidth: CGFloat = 0
-	var lastLaidOutHeight: CGFloat = 0
+	private var lastViewportFrame: CGRect = .null
+	private var lastViewportScale: CGFloat = 0
+	private var isHingePartiallyOpen = false
+	private let resolutionUpdate = ViewportResolutionUpdate()
+	private var keyboardFrameInScreen: CGRect?
 
 	override var prefersPointerLocked: Bool {
 		return true
@@ -207,12 +210,23 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	}
 
 	override func viewDidLoad() {
+		#if compiler(>=6.4)
+		if #available(iOS 27.1, *) {
+			view.addInteraction(UIHingeInteraction { [weak self] _, update in
+				self?.isHingePartiallyOpen = update.hinge?.status == .partiallyOpen
+				// Geometry may settle after the posture notification, including updates
+				// which keep the same hinge status.
+				DispatchQueue.main.async { [weak self] in self?.view.setNeedsLayout() }
+			})
+		}
+		#endif
+
 		// ScrollView Setup
 		scrollView = UIScrollView(frame: view.bounds)
 		scrollView.delegate = self
 		scrollView.minimumZoomScale = 1.0
 		scrollView.maximumZoomScale = 5.0
-		scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+		scrollView.autoresizingMask = []
 		// The scroll view is a programmatically-driven zoom/pan container only. Every touch is
 		// owned by touchOverlay (created below); the scroll view's own gestures are disabled so
 		// they can never race with or swallow our cursor / pinch / scroll handling.
@@ -255,7 +269,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		touchOverlay = TouchOverlayView(frame: view.bounds)
 		touchOverlay.backgroundColor = .clear
 		touchOverlay.isMultipleTouchEnabled = true
-		touchOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+		touchOverlay.autoresizingMask = []
 		touchOverlay.inputDelegate = self
 		view.addSubview(touchOverlay)
 
@@ -316,7 +330,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		NotificationCenter.default.addObserver(
 			self,
 			selector: #selector(keyboardWillShow),
-			name: UIResponder.keyboardWillShowNotification,
+			name: UIResponder.keyboardWillChangeFrameNotification,
 			object: nil
 		)
 		NotificationCenter.default.addObserver(
@@ -346,40 +360,70 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
 		super.viewWillTransition(to: size, with: coordinator)
 
-		let h = size.height
-		let w = size.width
-
-		// Reset zoom on rotation
-		scrollView.zoomScale = 1.0
-
-		self.glkView.updateSize(width: w, height: h)
-		contentView.frame.size = CGSize(width: w, height: h)
-		scrollView.contentSize = CGSize(width: w, height: h)
-		CParsec.setFrame(w, h, UIScreen.main.scale)
-
-        // Reset accessory view to ensure correct width in new orientation
-        clearToolbarModifiers(sendToHost: true)
-        keyboardAccessoriesView = nil
-        if keyboardVisible {
-            reloadInputViews()
-        }
+		clearToolbarModifiers(sendToHost: true)
+		keyboardAccessoriesView = nil
+		if keyboardVisible { reloadInputViews() }
+		coordinator.animate(alongsideTransition: { [weak self] _ in
+			self?.view.setNeedsLayout()
+		}, completion: { [weak self] _ in
+			self?.view.setNeedsLayout()
+			self?.view.layoutIfNeeded()
+		})
 	}
 
 	override func viewDidLayoutSubviews() {
 		super.viewDidLayoutSubviews()
-		// glkView/contentView get sized from possibly-stale bounds in viewDidLoad and have no
-		// autoresizing, so the stream renders in a corner until a rotation re-applies the size.
-		// re-apply once layout settles; skip while zoomed so we dont stomp pan/zoom.
-		guard scrollView != nil, scrollView.zoomScale == 1.0 else { return }
-		let w = view.bounds.width
-		let h = view.bounds.height
-		guard w > 0, h > 0, w != lastLaidOutWidth || h != lastLaidOutHeight else { return }
-		lastLaidOutWidth = w
-		lastLaidOutHeight = h
-		glkView.updateSize(width: w, height: h)
-		contentView.frame.size = CGSize(width: w, height: h)
-		scrollView.contentSize = CGSize(width: w, height: h)
-		CParsec.setFrame(w, h, UIScreen.main.scale)
+		guard scrollView != nil, touchOverlay != nil else { return }
+		let frame = streamViewportFrame(in: view.bounds)
+		let scale = traitCollection.displayScale
+		guard frame.width > 0, frame.height > 0,
+			  frame != lastViewportFrame || scale != lastViewportScale else { return }
+		// Save before changing zoom: its delegate can cause another layout pass.
+		lastViewportFrame = frame
+		lastViewportScale = scale
+		flushAllTouches()
+		scrollView.setZoomScale(1, animated: false)
+		scrollView.contentInset = .zero
+		scrollView.contentOffset = .zero
+		pinnedToKeyboard = false
+		scrollView.frame = frame
+		touchOverlay.frame = frame
+		contentView.frame = CGRect(origin: .zero, size: frame.size)
+		scrollView.contentSize = frame.size
+		glkView.updateSize(width: frame.width, height: frame.height)
+		CParsec.setFrame(frame.width, frame.height, scale)
+		cursorContentPos = clampToContent(cursorContentPos)
+		positionCursorOverlay()
+		if let keyboardFrameInScreen = keyboardFrameInScreen, keyboardVisible {
+			keyboardWillShow(notification: NSNotification(name: UIResponder.keyboardWillChangeFrameNotification,
+				object: nil, userInfo: [UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: keyboardFrameInScreen)]))
+		}
+		scheduleClientResolution(for: frame.size, scale: scale)
+	}
+
+	func streamViewportFrame(in bounds: CGRect) -> CGRect {
+		#if compiler(>=6.4)
+		if #available(iOS 27.1, *) {
+			let folds = view.reservedRegions(kind: .division).filter { $0.isActive }.map { $0.frame }
+			return StreamViewport.frame(in: bounds, partiallyOpen: isHingePartiallyOpen, folds: folds)
+		}
+		#endif
+		return bounds
+	}
+
+	private func scheduleClientResolution(for size: CGSize, scale: CGFloat) {
+		resolutionUpdate.cancel()
+		guard let pixels = StreamViewport.pixelSize(size, scale: scale) else { return }
+		ParsecResolution.updateClientResolution(width: Int(pixels.width), height: Int(pixels.height))
+		resolutionUpdate.schedule { [weak self] in
+			guard let self = self, self.view.window != nil, UIApplication.shared.applicationState == .active,
+				  SettingsHandler.resolution == .client,
+				  ParsecBackgroundManager.shared.hasActiveConnection,
+				  StreamViewport.needsResolutionUpdate(pixels, current: CGSize(width: DataManager.model.resolutionX, height: DataManager.model.resolutionY)) else { return }
+			DataManager.model.resolutionX = Int(pixels.width)
+			DataManager.model.resolutionY = Int(pixels.height)
+			CParsec.updateHostVideoConfig()
+		}
 	}
 
 	override func viewDidAppear(_ animated: Bool) {
@@ -400,6 +444,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	override func viewWillDisappear(_ animated: Bool) {
 		super.viewWillDisappear(animated)
+		resolutionUpdate.cancel()
 		UIApplication.shared.isIdleTimerDisabled = false
 		stopMomentum()
 		ClipboardSync.shared.stop()
@@ -407,7 +452,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			parent.setChildForHomeIndicatorAutoHidden(nil)
 			parent.setChildViewControllerForPointerLock(nil)
 		}
-		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
 	}
@@ -529,6 +574,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	@objc func keyboardWillShow(notification: NSNotification) {
 		if let keyboardFrame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue {
+			keyboardFrameInScreen = keyboardFrame
 			let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
 			let scrollFrameInView = scrollView.convert(scrollView.bounds, to: view)
 			let intersection = scrollFrameInView.intersection(keyboardFrameInView)
@@ -569,7 +615,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
             // Automatic scroll up only if mouse is in the bottom half of the screen
             let mouseY = CGFloat(CParsec.mouseInfo.mouseY)
-            let screenMidY = view.bounds.height / 2.1
+            let screenMidY = scrollView.bounds.height / 2.1
 
             if mouseY > screenMidY {
                  let maxOffsetY = max(0, scrollView.contentSize.height - scrollView.bounds.height + height)
@@ -589,7 +635,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	}
 
 	func pictureShiftAboveKeyboard(_ keyboard: CGFloat) -> CGFloat? {
-		let w = view.bounds.width, h = view.bounds.height
+		let w = scrollView.bounds.width, h = scrollView.bounds.height
 		guard keyboard > 0, CParsec.hostWidth > 0, CParsec.hostHeight > 0 else { return nil }
 		let picture = min(h, w * CGFloat(CParsec.hostHeight / CParsec.hostWidth))
 		guard picture <= h - keyboard else { return nil }
@@ -646,6 +692,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	@objc func keyboardWillHide(notification: NSNotification) {
 		keyboardHeight = 0.0
+		keyboardFrameInScreen = nil
         keyboardVisible = false
 		keyboardCoversPicture = false
 		setPanHandleVisible(false)
@@ -793,7 +840,10 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		}
 	}
 
-	@objc private func appWillResignActive() { flushAllTouches() }
+	@objc private func appWillResignActive() {
+		resolutionUpdate.cancel()
+		flushAllTouches()
+	}
 
 	// Drop all touch state and release any held button so nothing sticks when backgrounded.
 	private func flushAllTouches() {
@@ -804,6 +854,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		twoFingerResidual = false
 		twoFingerMode = .undecided
 		activeTouches = []
+		touchOrigins = [:]
 	}
 
 	private func startCursor() {
@@ -1071,8 +1122,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func clampToContent(_ p: CGPoint) -> CGPoint {
-		let w = view.bounds.width
-		let h = view.bounds.height
+		let w = contentView.bounds.width
+		let h = contentView.bounds.height
 		return CGPoint(x: min(max(0, p.x), w), y: min(max(0, p.y), h))
 	}
 
@@ -1082,8 +1133,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		guard let u = u else { return }
 		let zoom = scrollView.zoomScale
 		let off = scrollView.contentOffset
-		let screenX = cursorContentPos.x * zoom - off.x
-		let screenY = cursorContentPos.y * zoom - off.y
+		let screenX = scrollView.frame.minX + cursorContentPos.x * zoom - off.x
+		let screenY = scrollView.frame.minY + cursorContentPos.y * zoom - off.y
 		let cs = CGFloat(SettingsHandler.cursorScale)
 		let hotX = CGFloat(CParsec.mouseInfo.cursorHotX) * cs
 		let hotY = CGFloat(CParsec.mouseInfo.cursorHotY) * cs
@@ -1093,6 +1144,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	@objc func handleSingleFingerTap(_ gestureRecognizer: UITapGestureRecognizer) {
+		guard scrollView.frame.contains(gestureRecognizer.location(in: view)) else { return }
 		// Only click if the finger stayed put; a moved finger was a cursor nudge, not a tap.
 		if cursorDidMoveThisTouch { return }
 		if SettingsHandler.cursorMode == .direct { return }
@@ -1102,6 +1154,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	@objc func handleTwoFingerTap(_ gestureRecognizer: UITapGestureRecognizer) {
+		guard scrollView.frame.contains(gestureRecognizer.location(in: view)) else { return }
 		// A two-finger TAP is a right click; if the fingers moved (pinch/scroll) it wasn't a tap.
 		if twoFingerDidMove { return }
 		// dont leak a right-click to the host while backgrounding (app switch) or after a disconnect
@@ -1132,6 +1185,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		}
 		switch gestureRecognizer.state {
 		case .began:
+			guard scrollView.frame.contains(gestureRecognizer.location(in: view)) else { return }
 			// Click-and-hold (file drag): hold the left button; the overlay keeps moving the cursor.
 			clickHoldActive = true
 			CParsec.sendMouseClickMessage(ParsecMouseButton.init(rawValue: 1), true)
@@ -1162,7 +1216,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	func keepCursorAboveKeyboard() {
 		guard scrollView.zoomScale <= 1.0, keyboardVisible, scrollView.contentInset.bottom > 0, !pinnedToKeyboard,
 			  SettingsHandler.cursorMode != .direct, let cursor = u, !cursor.isHidden else { return }
-		let visibleBottom = view.bounds.height - keyboardHeight
+		let visibleBottom = scrollView.frame.maxY - keyboardHeight
 		let margin = min(50, max(0, (visibleBottom - cursor.frame.height) / 2 - 1))
 		let maxOffsetY = max(0, scrollView.contentSize.height - scrollView.bounds.height + scrollView.contentInset.bottom)
 		var target = scrollView.contentOffset.y
@@ -1183,8 +1237,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		guard scrollView.zoomScale > 1.0 else { return }
 		let zoom = scrollView.zoomScale
 		let bottomInset = keyboardVisible ? keyboardHeight : 0.0
-		let visibleWidth = view.bounds.width
-		let visibleHeight = view.bounds.height - bottomInset
+		let visibleWidth = scrollView.bounds.width
+		let visibleHeight = scrollView.bounds.height - bottomInset
 		let cursorX = cursorContentPos.x * zoom
 		let cursorY = cursorContentPos.y * zoom
 		var targetX = cursorX - visibleWidth / 2
@@ -1198,7 +1252,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 
 	private func edgeScrollVelocity(at p: CGPoint) -> CGPoint {
 		guard scrollView.zoomScale > 1.0 else { return .zero }
-		let visibleHeight = view.bounds.height - (keyboardVisible ? keyboardHeight : 0.0)
+		let visibleHeight = scrollView.bounds.height - (keyboardVisible ? keyboardHeight : 0.0)
 		func axis(_ v: CGFloat, _ length: CGFloat) -> CGFloat {
 			if v < edgeScrollMargin {
 				return -min(1, (edgeScrollMargin - v) / edgeScrollMargin) * edgeScrollMaxSpeed
@@ -1208,7 +1262,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			}
 			return 0
 		}
-		return CGPoint(x: axis(p.x, view.bounds.width), y: axis(p.y, visibleHeight))
+		return CGPoint(x: axis(p.x, scrollView.bounds.width), y: axis(p.y, visibleHeight))
 	}
 
 	private func stepEdgeScroll(_ dt: CGFloat) -> Bool {

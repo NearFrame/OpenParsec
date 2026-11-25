@@ -5,6 +5,7 @@ class ParsecGLKRenderer: NSObject, GLKViewDelegate, GLKViewControllerDelegate {
 	var glkView: GLKView
 	var glkViewController: GLKViewController
 
+	var lastHeight: CGFloat = 1.0
 	var lastWidth: CGFloat = 1.0
 	var lastScale: CGFloat = 0
 
@@ -35,9 +36,10 @@ class ParsecGLKRenderer: NSObject, GLKViewDelegate, GLKViewControllerDelegate {
 	func glkView(_ view: GLKView, drawIn rect: CGRect) {
 		if glkViewController.isPaused { return }
 		let deltaWidth: CGFloat = view.frame.size.width - lastWidth
-		if deltaWidth > 0.1 || deltaWidth < -0.1 || abs(view.contentScaleFactor - lastScale) > 0.01 {
+		if abs(view.frame.size.height - lastHeight) > 0.1 || deltaWidth > 0.1 || deltaWidth < -0.1 || abs(view.contentScaleFactor - lastScale) > 0.01 {
 			CParsec.setFrame(view.frame.size.width, view.frame.size.height, view.contentScaleFactor)
 			lastWidth = view.frame.size.width
+			lastHeight = view.frame.size.height
 			lastScale = view.contentScaleFactor
 		}
 

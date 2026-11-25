@@ -237,7 +237,8 @@ struct ParsecStatusBar: View {
 				ParsecView.getHostUserData()
 				// SDK forgets stream dims on reconnect, re-send them so the frame fills not corners
 				if let vc = parsecViewController {
-					CParsec.setFrame(vc.view.bounds.width, vc.view.bounds.height, UIScreen.main.scale)
+					let viewport = vc.streamViewportFrame(in: vc.view.bounds)
+					CParsec.setFrame(viewport.width, viewport.height, vc.traitCollection.displayScale)
 				}
 			}
 			if CParsec.runningRenderer != .metal || CACurrentMediaTime() - liveSince! > 6 {
@@ -721,8 +722,8 @@ struct ParsecView: View {
 
 		DataManager.model.constantFps = SettingsHandler.constantFps
 
-		let screenSize: CGSize = self.parsecViewController.view.frame.size
-		let scaleFactor = UIScreen.main.nativeScale
+		let screenSize = parsecViewController.streamViewportFrame(in: parsecViewController.view.bounds).size
+		let scaleFactor = parsecViewController.traitCollection.displayScale
 		ParsecResolution.updateClientResolution(width: Int(screenSize.width * scaleFactor), height: Int(screenSize.height * scaleFactor))
 
 		ParsecView.getHostUserData()

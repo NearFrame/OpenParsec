@@ -44,6 +44,7 @@ class ParsecMetalRenderer: NSObject, MTKViewDelegate {
 
 	var device: MTLDevice { queue.device }
 
+	private var lastHeight: CGFloat = 1.0
 	private var lastWidth: CGFloat = 1.0
 	private var lastScale: CGFloat = 0
 	private var drawnFrames = 0
@@ -115,9 +116,10 @@ class ParsecMetalRenderer: NSObject, MTKViewDelegate {
 
 	func draw(in view: MTKView) {
 		let deltaWidth: CGFloat = view.frame.size.width - lastWidth
-		if deltaWidth > 0.1 || deltaWidth < -0.1 || abs(view.contentScaleFactor - lastScale) > 0.01 {
+		if abs(view.frame.size.height - lastHeight) > 0.1 || deltaWidth > 0.1 || deltaWidth < -0.1 || abs(view.contentScaleFactor - lastScale) > 0.01 {
 			CParsec.setFrame(view.frame.size.width, view.frame.size.height, view.contentScaleFactor)
 			lastWidth = view.frame.size.width
+			lastHeight = view.frame.size.height
 			lastScale = view.contentScaleFactor
 		}
 		let size = CGSize(width: (view.bounds.width * view.contentScaleFactor).rounded(), height: (view.bounds.height * view.contentScaleFactor).rounded())

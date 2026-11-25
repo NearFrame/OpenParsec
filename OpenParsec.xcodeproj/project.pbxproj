@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D12500000000000000000001 /* StreamViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12500000000000000000002 /* StreamViewport.swift */; };
 		A27110000000000000000001 /* ConnectionAttemptPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27110000000000000000002 /* ConnectionAttemptPolicy.swift */; };
 		170E0A772BEF5AFF00B0EA32 /* ParsecViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170E0A762BEF5AFF00B0EA32 /* ParsecViewController.swift */; };
 		17374D412CB8E35D00EDCEE7 /* KeyCodeTranslators.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17374D402CB8E35500EDCEE7 /* KeyCodeTranslators.swift */; };
@@ -61,6 +62,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D12500000000000000000002 /* StreamViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamViewport.swift; sourceTree = "<group>"; };
 		A27110000000000000000002 /* ConnectionAttemptPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionAttemptPolicy.swift; sourceTree = "<group>"; };
 		170E0A762BEF5AFF00B0EA32 /* ParsecViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsecViewController.swift; sourceTree = "<group>"; };
 		17374D402CB8E35500EDCEE7 /* KeyCodeTranslators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCodeTranslators.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 		27E61A90292965FC00FF6563 /* OpenParsec */ = {
 			isa = PBXGroup;
 			children = (
+				D12500000000000000000002 /* StreamViewport.swift */,
 				A27110000000000000000002 /* ConnectionAttemptPolicy.swift */,
 				E76224A02F8C017700A2F86F /* ParsecBackgroundManager.swift */,
 				E762250A2F8D0A0000A2F86F /* PictureInPictureManager.swift */,
@@ -291,6 +294,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D12500000000000000000001 /* StreamViewport.swift in Sources */,
 				A27110000000000000000001 /* ConnectionAttemptPolicy.swift in Sources */,
 				FC16A7AD29A97BDA00BB70A7 /* Shared.swift in Sources */,
 				84480EBE2ADC4FDA007DE5F1 /* GameController.swift in Sources */,
