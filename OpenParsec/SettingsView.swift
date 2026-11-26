@@ -74,6 +74,10 @@ struct SettingsView: View {
 									Toggle("", isOn: $settings.cursorMomentum)
 										.frame(width: 80)
 								}
+								CatItem("Tap to Drag") {
+									Toggle("", isOn: $settings.tapToDrag)
+										.frame(width: 80)
+								}
 								CatSlider("Pointer Speed", value: $settings.mouseSensitivity, in: 0.1...4, step: 0.1)
 								CatSlider("Cursor Size", value: $settings.cursorScale, in: 0.1...4, step: 0.1)
 								CatSlider("Scroll Speed", value: $settings.scrollSensitivity, in: 0.5...5, step: 0.5)

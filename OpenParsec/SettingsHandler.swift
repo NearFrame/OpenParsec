@@ -13,6 +13,7 @@ final class SettingsStore: ObservableObject {
 			"decoder": DecoderPref.h264.rawValue,
 			"cursorMode": CursorMode.touchpad.rawValue,
 			"cursorMomentum": true,
+			"tapToDrag": false,
 			"cursorScale": 0.5,
 			"mouseSensitivity": 1.0,
 			"optionAsCommand": false,
@@ -76,6 +77,11 @@ final class SettingsStore: ObservableObject {
 	var cursorMomentum: Bool {
 		get { defaults.bool(forKey: "cursorMomentum") }
 		set { store(newValue, "cursorMomentum") }
+	}
+
+	var tapToDrag: Bool {
+		get { defaults.bool(forKey: "tapToDrag") }
+		set { store(newValue, "tapToDrag") }
 	}
 
 	var cursorScale: Double {
@@ -191,6 +197,7 @@ struct SettingsHandler {
 	static var decoder: DecoderPref { get { SettingsStore.shared.decoder } set { SettingsStore.shared.decoder = newValue } }
 	static var cursorMode: CursorMode { get { SettingsStore.shared.cursorMode } set { SettingsStore.shared.cursorMode = newValue } }
 	static var cursorMomentum: Bool { get { SettingsStore.shared.cursorMomentum } set { SettingsStore.shared.cursorMomentum = newValue } }
+	static var tapToDrag: Bool { get { SettingsStore.shared.tapToDrag } set { SettingsStore.shared.tapToDrag = newValue } }
 	static var cursorScale: Double { get { SettingsStore.shared.cursorScale } set { SettingsStore.shared.cursorScale = newValue } }
 	static var mouseSensitivity: Double { get { SettingsStore.shared.mouseSensitivity } set { SettingsStore.shared.mouseSensitivity = newValue } }
 	static var optionAsCommand: Bool { get { SettingsStore.shared.optionAsCommand } set { SettingsStore.shared.optionAsCommand = newValue } }

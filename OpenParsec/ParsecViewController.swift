@@ -840,7 +840,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		suppressSingleFingerTap = false
 		// Only a real preceding click arms the second touch. A second stationary tap
 		// still clicks normally; movement turns it into a held-button drag.
-		tapDragCandidate = SettingsHandler.cursorMode == .touchpad && lastTapTime.map {
+		tapDragCandidate = SettingsHandler.tapToDrag && SettingsHandler.cursorMode == .touchpad && lastTapTime.map {
 			CACurrentMediaTime() - $0 <= tapDragInterval
 				&& hypot(singleTouchStartScreen.x - lastTapScreen.x,
 						 singleTouchStartScreen.y - lastTapScreen.y) <= tapDragRadius
