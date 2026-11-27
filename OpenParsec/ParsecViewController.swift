@@ -374,7 +374,6 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		scrollView.contentSize = size
 		updateRenderScale()
 		CParsec.setFrame(size.width, size.height, scale)
-		ParsecResolution.updateClientResolution(width: Int(size.width * scale), height: Int(size.height * scale))
 		positionCursorOverlay()
 		clearToolbarModifiers(sendToHost: true)
 		keyboardAccessoriesView = nil
