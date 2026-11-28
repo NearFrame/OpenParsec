@@ -26,19 +26,20 @@ class TouchController {
 
 		let parsecTap = ParsecMouseButton(rawValue: UInt32(typeOfTap))
 
-		// send press+release back-to-back. the old 20ms async release could be orphaned by a
-		// reconnect/disconnect landing in that window, leaving the button (esp. right) stuck on the
-		// host — which pops a context menu that survives the transition.
 		if SettingsHandler.cursorMode == .direct {
 			let x = Int32(location.x)
 			let y = Int32(location.y)
 
 			CParsec.sendMouseMessage(parsecTap, x, y, true)
-			CParsec.sendMouseMessage(parsecTap, x, y, false)
+			DispatchQueue.global().asyncAfter(deadline: .now() + 0.02) {
+				CParsec.sendMouseMessage(parsecTap, x, y, false)
+			}
 
 		} else {
 			CParsec.sendMouseClickMessage(parsecTap, true)
-			CParsec.sendMouseClickMessage(parsecTap, false)
+			DispatchQueue.global().asyncAfter(deadline: .now() + 0.02) {
+				CParsec.sendMouseClickMessage(parsecTap, false)
+			}
 		}
 	}
 
