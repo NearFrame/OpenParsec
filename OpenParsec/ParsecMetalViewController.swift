@@ -17,7 +17,7 @@ class ParsecMetalViewController: ParsecPlayground {
 	}
 
 	public func viewDidLoad() {
-		metalView = MTKView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height), device: metalRenderer?.device)
+		metalView = MTKView(frame: .zero, device: metalRenderer?.device)
 		metalView.colorPixelFormat = .bgra8Unorm
 		metalView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 		metalView.autoResizeDrawable = false
